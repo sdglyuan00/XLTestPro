@@ -1,0 +1,910 @@
+//
+//  AppDelegate.m
+//  GJ
+//
+//  Created by E269 on 14-11-28.
+//  Copyright (c) 2014年 ZKL. All rights reserved.
+//
+
+#import "AppDelegate.h"
+//#import "GJMasterViewController.h"
+#import "GJYNavigationController.h"
+#import "GuideViewController.h"
+#import "WXApi.h"
+#import "AFNetworking.h"
+#import "GJLoadFailView.h"
+#import "UncaughtExceptionHandler.h"
+#import "APService.h"
+#import "GJCustomTabbarController.h"
+#import "MLBlackTransition.h"
+#import "GJPayHelp.h"
+#import <AlipaySDK/AlipaySDK.h>
+#import "RCIMClient.h"
+#import "PayResultViewController.h"
+#import "ASMLNAVViewController.h"
+
+#define storeVersionKey  @"version"
+#define storeUpUrlKey    @"trackViewUrl"
+#define storeNotesKey    @"releaseNotes"
+
+#define orderAlertTag    90909
+#define rcimChangeTag    90908
+
+//RCIMConnectionStatusDelegate,RCReconnectStatusDelegate
+@interface AppDelegate ()<UIAlertViewDelegate,WXApiDelegate,WeiboSDKDelegate,WBHttpRequestDelegate>
+{
+    GJCustomTabbarController *tabbarCtrl;
+    NSString                 *orderIdString;
+}
+@property (nonatomic,strong) GJYNavigationController *gjyNavigationController;
+@end
+
+@implementation AppDelegate
+
+- (void)getStatusOfNetwork:(NSNotification*)notification
+{
+    GJNsLog( @"notification.userInfo  : %@",notification.userInfo);
+    self.statusOfNetwork = notification.userInfo[@"AFNetworkingReachabilityNotificationStatusItem"];
+    [[NSNotificationCenter defaultCenter] postNotificationName:failedOfNetwork object:nil];
+}
+
+
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+//    [NSThread sleepForTimeInterval:2.0];
+
+//    [MLBlackTransition validatePanPackWithMLBlackTransitionGestureRecognizerType:MLBlackTransitionGestureRecognizerTypeScreenEdgePan];
+    /*
+     * UIWindow
+     */
+    //    判断用户的网络设置
+    [[AFNetworkReachabilityManager sharedManager] startMonitoring];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(getStatusOfNetwork:) name:AFNetworkingReachabilityDidChangeNotification object:nil];
+    
+    self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+    self.window.backgroundColor = [UIColor whiteColor];
+    CGRect tabBarRect=self.window.frame;
+    if (!IsiOS7Later) {
+        // 如果系统是ios7 之前版本
+        tabBarRect.origin.y=0;
+        tabBarRect.size.height = self.window.frame.size.height - StatusBarHeight;
+    }else{
+        [application setStatusBarStyle:UIStatusBarStyleLightContent];
+    }
+    
+    /*
+     *注册聊天
+     */
+    [RCIM initWithAppKey:RCIMAPPKEY deviceToken:nil];
+//    [[RCIM sharedRCIM] setConnectionStatusDelegate:self];
+//    [[RCIMClient sharedRCIMClient] setReconnectionStatusDelegate:self];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadWindowsMethod) name:reloadWindowsKey object:nil];
+    
+       /*
+     *注册极光推送
+     */
+#if __IPHONE_OS_VERSION_MAX_ALLOWED > __IPHONE_7_1
+    if ([[UIDevice currentDevice].systemVersion floatValue] >= 8.0) {
+        //可以添加自定义categories
+        [APService registerForRemoteNotificationTypes:(UIUserNotificationTypeBadge |
+                                                       UIUserNotificationTypeSound |
+                                                       UIUserNotificationTypeAlert)
+                                           categories:nil];
+    } else {
+        //categories 必须为nil
+        [APService registerForRemoteNotificationTypes:(UIRemoteNotificationTypeBadge |
+                                                       UIRemoteNotificationTypeSound |
+                                                       UIRemoteNotificationTypeAlert)
+                                           categories:nil];
+    }
+#else
+    //categories 必须为nil
+    [APService registerForRemoteNotificationTypes:(UIRemoteNotificationTypeBadge |
+                                                   UIRemoteNotificationTypeSound |
+                                                   UIRemoteNotificationTypeAlert)
+                                       categories:nil];
+#endif
+    // Required
+    [APService setupWithOption:launchOptions];
+    
+    /*/Users/chenxiaoqiang/Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/312933275/Image/7M6B)BXR4(]UBYGJVCZUC{E.gif
+     *异常捕捉开启
+     */
+//    InstallUncaughtExceptionHandler();
+    
+    /*
+     *umeng统计
+     */
+    
+    //调试的时候不统计    release模式才统计
+    if(umengType)
+    {
+        [MobClick startWithAppkey:umengAPPKey reportPolicy:BATCH   channelId:APPchannel];
+        NSString *Cversion = [NSString stringWithFormat:@"%@",kAPPVersionNO];
+        [MobClick setAppVersion:Cversion];
+    }
+    
+    
+    NSString *oldVersionStr = [[NSUserDefaults standardUserDefaults] objectForKey:@"version"];
+    NSString *newVersionStr = kAppVersionNumber;
+    if ([[[NSUserDefaults standardUserDefaults] objectForKey:@"first"] intValue] == 0 || [oldVersionStr integerValue] < [newVersionStr integerValue])
+    {
+        [[NSUserDefaults standardUserDefaults] setObject:kAppVersionNumber forKey:@"version"];
+        GuideViewController *guideVC = [[GuideViewController alloc] init];
+        [self.window setRootViewController:guideVC];
+      
+    }else
+    {
+        [self getServerDateTime];
+        [[chatHelp sharedManager] refurbishAllUserInfo];
+        [self setMainTabBarViewController];
+        //检查版本更新
+        if(![self isLaunchWithVersionNotification:launchOptions])
+        {
+            [self updateVersionMethod];
+        }
+    }
+    // 注册微信
+    [WXApi registerApp:chatAppID];
+    [self.window makeKeyAndVisible];
+    
+   
+    [WeiboSDK registerApp:kSinaAppKey];
+    [WeiboSDK enableDebugMode:YES];
+    
+//    [[KindsOfLogIn sharedKindsOfLogIn] ReloadUserInfoByAccessToken];
+    
+//    [[NSUserDefaults standardUserDefaults] setObject:@"丽水" forKey:Location_UserDefaults];
+    return YES;
+}
+
+- (BOOL)isLaunchWithVersionNotification:(NSDictionary *)launch
+{//启动是不是因为版本更新推送启动的   如果是就交给推送统一处理方法 处理   如果不是  就自己检查版本问题
+    BOOL rBool = NO;
+    if(launch)
+    {
+        if([launch.allKeys containsObject:UIApplicationLaunchOptionsRemoteNotificationKey])
+        {
+            if([[launch allKeys]containsObject:ganjieJpushKey])
+            {
+                NSString *jsonString = [launch objectForKey:ganjieJpushKey];
+                NSDictionary *diccc = [jsonString objectFromJSONString];
+                if([[diccc allKeys] containsObject:@"msgCode"])
+                {
+                    NSString *pushType = [diccc objectForKey:@"msgCode"];
+                    if([pushType integerValue] == 2)   //1是首页bannerdata数组只有多个值  2是推送data数组只有一个值
+                    {
+                        NSInteger type = [[diccc objectForKey:@"type"] integerValue];
+                        if(type == 5)
+                        {
+                            rBool = YES;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return rBool;
+}
+
+- (void)setMainTabBarViewController
+{
+    tabbarCtrl = [[GJCustomTabbarController alloc]init];
+    self.window.rootViewController = tabbarCtrl;
+    [self.window makeKeyAndVisible];
+}
+
+//在不知道 当前也面的情况下 直接跳 我们想去的页面
+- (GJCustomViewController *)currentNavCtrlPushOtherVC:(GJCustomViewController *)otherVC andHideBoomBar:(BOOL)hideBar
+{
+    ASMLNAVViewController *navCtrl = (ASMLNAVViewController *)[tabbarCtrl selectedViewController];
+    GJCustomViewController       *vCtrl   = (GJCustomViewController *)navCtrl.topViewController;
+    if(!hideBar)
+    {
+        [vCtrl.navigationController pushViewController:otherVC animated:YES];
+    }
+    else
+    {
+        [navCtrl HideBootmAndPushViewController:otherVC animated:YES];
+    }
+    return vCtrl;
+}
+//获取当前的viewcontroller
+- (GJCustomViewController *)getCurrentViewController
+{
+    ASMLNAVViewController *navCtrl = (ASMLNAVViewController *)[tabbarCtrl selectedViewController];
+    GJCustomViewController       *vCtrl   = (GJCustomViewController *)navCtrl.topViewController;
+    return vCtrl;
+}
+
+#pragma mark --- jpush  callback
+- (void)tagsAliasCallback:(int)iResCode tags:(NSSet*)tags alias:(NSString*)alias
+{
+    NSLog(@"jpush set tags success iResCode--%@\ntags--%@\nalias--%@",@(iResCode),tags,alias);
+}
+
+- (void)reloadWindowsMethod
+{
+    [self application:nil didFinishLaunchingWithOptions:nil];
+}
+
+- (void)updateVersionMethod
+{
+    NSMutableDictionary *dic = [[NSMutableDictionary alloc]init];
+    [dic setObject:applicationType forKey:@"Type"];
+    [dic setObject:systemType forKey:@"System"];
+    [dic setObject:kAPPVersionNO forKey:@"VersionNo"];
+    [[GJRequestNewWork manager] myPOSTUrl:Request_APPVersion parameters:dic success:^(id responseObject)
+     {
+         if ([responseObject objectForKey:@"model"])
+         {
+             GJNsLog(@"%@",responseObject);
+             NSString *versionNO = [[responseObject objectForKey:@"model"] objectForKey:@"versionno"];
+             NSString *tempString = [NSString stringWithFormat:@"%@",versionNO];
+             NSString *isforced  = [[responseObject objectForKey:@"model"] objectForKey:@"isforced"];
+             self.appDownUrl = responseObject[@"model"][@"downloaduri"];
+
+             versionNO = [versionNO stringByReplacingOccurrencesOfString:@"." withString:@""];
+             NSString *appVersion = [kAPPVersionNO stringByReplacingOccurrencesOfString:@"." withString:@""];
+             if([versionNO intValue] - [appVersion intValue] > 0)
+             {
+                 //如果检测到有
+                 dispatch_async(dispatch_get_main_queue(), ^{
+                     [self haveNewVersion:tempString andIsForced:isforced newVersionContent:responseObject[@"model"][@"contents"]];
+                 });
+             }
+             else
+             {
+                 //如果检测到没有
+                 [self checkStoreVersion];
+             }
+         }
+         else
+         {
+             //或者检测失败
+             [self checkStoreVersion];
+         }
+     }failure:^(NSError *error)
+     {
+         //或者请求失败
+         [self checkStoreVersion];
+     }];
+}
+
+#pragma mark --- 通过商店获取最新版本号
+- (void)checkStoreVersion
+{
+//    商店 数据判断  关闭
+//    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+//    @try {
+//        [self checkStoreVersionDetail];
+//    }
+//    @catch (NSException *exception) {
+//        NSLog(@"商店版本更新报错：%@",exception);
+//    }
+//    @finally {
+//        NSLog(@"@finally");
+//    }
+//        });
+}
+
+- (void)checkStoreVersionDetail
+{
+    NSString *versionString = @"";
+    NSString *downUrl       = @"";
+    NSString *releaseNotes  = @"更新了部分功能";
+    NSMutableURLRequest *urlReuqest = [[NSMutableURLRequest alloc]initWithURL:[NSURL URLWithString:@"https://itunes.apple.com/lookup?id=954705599"]];
+    urlReuqest.timeoutInterval = 20;
+    NSData  *data = [NSURLConnection sendSynchronousRequest:urlReuqest returningResponse:nil error:nil];
+    
+    //如果data为空返回
+//    if (data==nil) {
+//        return;
+//    }
+    
+    NSDictionary *dic = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableLeaves error:nil];
+    NSArray *resuleArray = [dic objectForKey:@"results"];
+    NSDictionary *resuleDic = [resuleArray objectAtIndex:0];
+    if([[resuleDic allKeys] containsObject:storeVersionKey])
+    {
+        versionString = [resuleDic objectForKey:storeVersionKey];
+    }
+    if([[resuleDic allKeys] containsObject:storeUpUrlKey])
+    {
+        downUrl = [resuleDic objectForKey:storeUpUrlKey];
+        if(downUrl.length > 0 && downUrl)
+        {
+            self.appDownUrl = downUrl;
+        }
+    }
+    if([[resuleDic allKeys] containsObject:storeNotesKey])
+    {
+        releaseNotes = [resuleDic objectForKey:storeNotesKey];
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self haveNewVersion:versionString andIsForced:@"0" newVersionContent:releaseNotes];
+    });
+}
+
+//更新处理
+- (void)haveNewVersion:(NSString *)versionNO andIsForced:(NSString *)isforced newVersionContent:(NSString *)contents
+{
+    NSString *tempVersion = [NSString stringWithFormat:@"%@",versionNO];
+    versionNO = [versionNO stringByReplacingOccurrencesOfString:@"." withString:@""];
+    NSString *appVersion = [kAPPVersionNO stringByReplacingOccurrencesOfString:@"." withString:@""];
+    if([versionNO intValue] - [appVersion intValue] > 0)
+    {
+        if([isforced integerValue] == 0)
+        {
+            Ansen_AlerttView *alertView = [[Ansen_AlerttView alloc] initWithTitle:[NSString stringWithFormat:@"发现新版本%@",tempVersion] message:contents showType:UIAsenAlertViewTypeDeFault delegate:self cancelButtonTitle:@"立即更新" otherButtonTitles:@"稍后再说", nil];
+            [self.window addSubview:alertView];
+            [alertView show];
+        }
+        else
+        {
+            Ansen_AlerttView *alertView = [[Ansen_AlerttView alloc] initWithTitle:[NSString stringWithFormat:@"发现新版本%@",tempVersion] message:contents showType:UIAsenAlertViewTypeDeFault delegate:self cancelButtonTitle:@"立即更新" otherButtonTitles:nil];
+            [self.window addSubview:alertView];
+            [alertView show];
+        }
+    }
+}
+
+
+
+#pragma mark --UIAlertView
+- (void)alertView:(Ansen_AlerttView *)alertView buttonClickForIndex:(NSInteger)clickIndex
+{
+    if (clickIndex == 0) {
+        [[UIApplication sharedApplication] openURL:[NSURL URLWithString:self.appDownUrl]];
+    }
+}
+
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
+{
+    switch (alertView.tag) {
+        case orderAlertTag:
+        {
+            NSString *string = [NSString stringWithFormat:@"%@",orderIdString];
+            if (buttonIndex == 0)
+            {
+                [self pushOrderDetailViewController:string];
+            }
+            orderIdString = nil;
+        }
+            break;
+        case rcimChangeTag:
+        {
+            if(buttonIndex == 1)
+            {
+                [chatHelp connectRCIMServer:^(BOOL callbackBool) {
+                    if(callbackBool)
+                    {
+                        GJNsLog(@"重新连接融云服务成功");
+                    }
+                    else
+                    {
+                        GJNsLog(@"重新连接融云服务失败");
+                    }
+                }];
+            }
+        }
+            break;
+            
+        default:
+            break;
+    }
+}
+
+#ifdef IsiOS8Later
+- (void)application:(UIApplication *)application didRegisterUserNotificationSettings:(UIUserNotificationSettings *)notificationSettings
+{
+    // Register to receive notifications.
+    [application registerForRemoteNotifications];
+}
+
+- (void)application:(UIApplication *)application handleActionWithIdentifier:(NSString *)identifier forRemoteNotification:(NSDictionary *)userInfo completionHandler:(void(^)())completionHandler
+{
+    // Handle the actions.
+    if ([identifier isEqualToString:@"declineAction"]){
+    }
+    else if ([identifier isEqualToString:@"answerAction"]){
+    }
+}
+#endif
+
+#pragma mark 获取机器码
+//过滤字符串
+- (NSString *)urlSafe:(NSString *)source
+{
+    NSString *result = source;
+    result = [result stringByReplacingOccurrencesOfString:@"/" withString:@"-"];
+    result = [result stringByReplacingOccurrencesOfString:@"+" withString:@"!"];
+    return result;
+}
+
+- (void)application:(UIApplication *)application didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken
+{
+    NSString *pDeviceTokenStr = [[NSString alloc] initWithData:[GTMBase64 encodeData:deviceToken] encoding:NSUTF8StringEncoding];
+    [[NSUserDefaults standardUserDefaults] setObject:deviceToken forKey:@"AppPushToken"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    
+    NSString *pDeviceToken = [self urlSafe:pDeviceTokenStr];
+    GJNsLog(@"deviceToken:%@",pDeviceToken);
+    
+    if([GJUserInformation getUserIsLogin])
+    {
+        //如果是登陆状态 注册 荣云推送
+        [[RCIM sharedRCIM] setDeviceToken:deviceToken];
+        [[RCIM sharedRCIM]setReceiveMessageDelegate:self];
+        [self connectionRCIMServerMethod];
+        //如果是登陆状态 注册 jpush的tag为当前版本号 和 登陆的用户名
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+            NSString *tagId = [NSString stringWithFormat:@"%@%@",[GJUserInformation sharedManager].userInfo.u_accountid,pushAliasKey];
+            [APService setTags:[NSSet setWithObjects:kAppVersionNumber,tagId,nil] alias:tagId callbackSelector:@selector(tagsAliasCallback:tags:alias:) object:self];
+        });
+    }
+    else
+    {
+        //如果是登陆状态 注册 jpush的tag为当前版本号
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        [APService setTags:[NSSet setWithObjects:kAppVersionNumber,nil] alias:@"" callbackSelector:@selector(tagsAliasCallback:tags:alias:) object:self];
+        });
+    }
+    /*
+     *极光推送
+     */
+    [APService registerDeviceToken:deviceToken];
+}
+
+- (void)connectionRCIMServerMethod
+{
+    [chatHelp connectRCIMServer:^(BOOL callbackBool) {
+        if(callbackBool)
+        {
+            GJNsLog(@"连接融云服务成功");
+        }
+        else
+        {
+            GJNsLog(@"连接融云服务失败");
+        }
+    }];
+}
+
+-(void)getServerDateTime
+{
+<<<<<<< .mine
+    
+=======
+//    NSString *userId = [[NSUserDefaults standardUserDefaults] objectForKey:UserId];
+>>>>>>> .r93564
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+<<<<<<< .mine
+        @try {
+            NSURL *requestUrl = [NSURL URLWithString:[NSString stringWithFormat:@"%@%@",AppRequestTestURL,Request_Get_System]];
+            NSMutableURLRequest *urlRequest = [[NSMutableURLRequest alloc]initWithURL:requestUrl];
+            [urlRequest setHTTPMethod:@"POST"];
+            urlRequest.timeoutInterval = 30;
+            NSString *userId = [[NSUserDefaults standardUserDefaults] objectForKey:UserId];
+            if(userId.length > 0 && userId != nil)
+=======
+        NSURL *requestUrl = [NSURL URLWithString:[NSString stringWithFormat:@"%@%@",AppRequestTestURL,Request_Get_System]];
+        NSMutableURLRequest *urlRequest = [[NSMutableURLRequest alloc]initWithURL:requestUrl];
+        [urlRequest setHTTPMethod:@"POST"];
+        urlRequest.timeoutInterval = 30;
+        //老数据类型是int，会崩溃，需要强制转string
+        NSString *userId = [NSString stringWithFormat:@"%@",[[NSUserDefaults standardUserDefaults] objectForKey:UserId]];
+//        NSString *userId =[[NSUserDefaults standardUserDefaults] objectForKey:UserId];
+        if(userId.length > 0 && userId != nil)
+        {
+            NSString *bodyString    = [NSString stringWithFormat:@"accountId=%@",userId];
+            NSData   *bodyData      = [bodyString dataUsingEncoding:NSUTF8StringEncoding];
+            [urlRequest setHTTPBody:bodyData];
+        }
+        NSData *returnData = [NSURLConnection sendSynchronousRequest:urlRequest returningResponse:nil error:nil];
+        if(returnData)
+        {
+            NSDictionary *dic = [NSJSONSerialization JSONObjectWithData:returnData options:NSJSONReadingAllowFragments error:nil];
+            GJNsLog(@"dic-------->%@",dic);
+            NSString *dateString = dic[@"time"];
+            NSDateFormatter *dateFrame = [[NSDateFormatter alloc]init];
+            dateFrame.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+            NSDate *serverDate = [dateFrame dateFromString:dateString];
+            NSDate *appDate = [NSDate date];
+            NSInteger mistiming = [serverDate timeIntervalSinceDate:appDate];
+            GJNsLog(@"app于server时间差为 %@",@(mistiming));
+            [[NSUserDefaults standardUserDefaults] setObject:[NSNumber numberWithInteger:mistiming] forKey:serverAPPmistiming];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            BOOL isNeedLogin = [dic[@"needLogin"] boolValue];
+            if(isNeedLogin)
+>>>>>>> .r93564
+            {
+                NSString *bodyString    = [NSString stringWithFormat:@"accountId=%@",userId];
+                NSData   *bodyData      = [bodyString dataUsingEncoding:NSUTF8StringEncoding];
+                [urlRequest setHTTPBody:bodyData];
+            }
+            NSData *returnData = [NSURLConnection sendSynchronousRequest:urlRequest returningResponse:nil error:nil];
+            if(returnData)
+            {
+                NSDictionary *dic = [NSJSONSerialization JSONObjectWithData:returnData options:NSJSONReadingAllowFragments error:nil];
+                GJNsLog(@"dic-------->%@",dic);
+                NSString *dateString = dic[@"time"];
+                NSDateFormatter *dateFrame = [[NSDateFormatter alloc]init];
+                dateFrame.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+                NSDate *serverDate = [dateFrame dateFromString:dateString];
+                NSDate *appDate = [NSDate date];
+                NSInteger mistiming = [serverDate timeIntervalSinceDate:appDate];
+                GJNsLog(@"app于server时间差为 %@",@(mistiming));
+                [[NSUserDefaults standardUserDefaults] setObject:[NSNumber numberWithInteger:mistiming] forKey:serverAPPmistiming];
+                [[NSUserDefaults standardUserDefaults] synchronize];
+                BOOL isNeedLogin = [dic[@"needLogin"] boolValue];
+                if(isNeedLogin)
+                {
+                    [GJUserInformation userQuit];
+                }
+            }
+        }
+        @catch (NSException *exception) {
+            GJNsLog(@"%@:exception-->%@",NSStringFromSelector(_cmd),exception);
+        }
+        @finally {
+            GJNsLog(@"%@:finish",NSStringFromSelector(_cmd));
+        }
+        
+    });
+}
+
+- (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo {
+    /*
+     *极光推送
+     */
+    [APService handleRemoteNotification:userInfo];
+}
+
+//通知接受方法
+//didReceiveRemoteNotification
+//didReceiveLocalNotification
+- (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler {
+    
+    
+    // IOS 7 Support Required
+    [APService handleRemoteNotification:userInfo];
+    completionHandler(UIBackgroundFetchResultNewData);
+    [self notificationReceiveMethod:userInfo];
+}
+
+-(void)application:(UIApplication *)application didReceiveLocalNotification:(UILocalNotification *)notification
+{
+    [self notificationReceiveMethod:notification.userInfo];
+}
+
+- (void)applicationWillResignActive:(UIApplication *)application {
+    // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
+    // Use this method to pause ongoing tasks, disable timers, and throttle down OpenGL ES frame rates. Games should use this method to pause the game.
+}
+
+- (void)applicationDidEnterBackground:(UIApplication *)application {
+    // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
+    // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
+    [application setApplicationIconBadgeNumber:0];
+    [APService setBadge:0];
+}
+
+- (void)applicationWillEnterForeground:(UIApplication *)application {
+    [application setApplicationIconBadgeNumber:0];
+    [APService setBadge:0];
+    // Called as part of the transition from the background to the inactive state; here you can undo many of the changes made on entering the background.
+}
+
+- (void)applicationDidBecomeActive:(UIApplication *)application {
+    // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+}
+
+- (void)applicationWillTerminate:(UIApplication *)application {
+    // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
+}
+
+#pragma mark -
+#pragma mark - public methods
+
++ (AppDelegate *)AppDelegate{
+    return (AppDelegate *)[UIApplication sharedApplication].delegate;
+}
+
+
+#pragma mark - Application's Documents directory
+
+// Returns the URL to the application's Documents directory.
+- (NSURL *)applicationDocumentsDirectory
+{
+    return [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+}
+
+#pragma mark -- OpenURL
+- (BOOL)application:(UIApplication *)application openURL:(NSURL *)url sourceApplication:(NSString *)sourceApplication annotation:(id)annotation
+{
+    return [TencentOAuth HandleOpenURL:url]||[WXApi handleOpenURL:url delegate:self]|| [WeiboSDK handleOpenURL:url delegate:self] || [GJPayHelp handleOpenURL:url];
+}
+- (BOOL)application:(UIApplication *)application handleOpenURL:(NSURL *)url
+{
+    return [TencentOAuth HandleOpenURL:url] || [WXApi handleOpenURL:url delegate:self]|| [WeiboSDK handleOpenURL:url delegate:self] || [GJPayHelp handleOpenURL:url];
+}
+
+#pragma mark -- WXApi
++ (void)LogInWitWXApi:(SendAuthReq *)req
+{
+    [WXApi sendReq:req];
+}
+
+- (void) onResp:(BaseResp *)resp
+{
+    if([resp isKindOfClass:[SendAuthResp class]])
+    {
+        SendAuthResp *aresp = (SendAuthResp *)resp;
+                
+        if (aresp.errCode == 0) {
+//            [BaseProgressHUD showMsgOnView:self.window Msg:@"" animated:YES];
+            [GJLoadingHelp showLoadingOnView:[AppDelegate AppDelegate].window customImage:nil backGroundImage:nil timeOut:0 animationFinish:^{
+                GJNsLog(@"动画完成");
+            }];
+
+            NSString *code = aresp.code;
+//            code = @"123";
+            NSDictionary *dic = @{@"code":code};
+            [KindsOfLogIn sharedKindsOfLogIn].getDic = dic;
+            [[NSNotificationCenter defaultCenter] postNotificationName:WXRELOADINFOMATION object:nil];
+        }
+
+    }
+    else if ([resp isKindOfClass:[SendMessageToWXResp class]])
+    {
+        if(resp.errCode == 0)
+        {
+            NSLog(@"分享 什么的 成功");
+            [BaseProgressHUD showOnWindowMsg:@"分享成功" afterDelay:1.5];
+        }
+    }
+    else if ([resp isKindOfClass:[PayResp class]])  //支付
+    {
+        [[GJPayHelp shareManager] weixinPayResultWithCode:resp];
+    }
+}
+
+#pragma mark -- WeiBoAPI
+
+- (void)didReceiveWeiboRequest:(WBBaseRequest *)request
+{
+    
+}
+
+- (void)didReceiveWeiboResponse:(WBBaseResponse *)response
+{
+    if ([response isKindOfClass:WBAuthorizeResponse.class])
+    {
+        if ((NSInteger)response.statusCode == 0) {
+//            [BaseProgressHUD showMsgOnView:self.window Msg:@"" animated:YES];
+            [GJLoadingHelp showLoadingOnView:[AppDelegate AppDelegate].window customImage:nil backGroundImage:nil timeOut:0 animationFinish:^{
+                GJNsLog(@"动画完成");
+            }];
+
+            WBAuthorizeResponse *wbAuthorize = (WBAuthorizeResponse *)response;
+            [KindsOfLogIn sharedKindsOfLogIn].getDic = @{WeiBo_Uid: wbAuthorize.userID?wbAuthorize.userID:@"",WeiBo_accessToken:wbAuthorize.accessToken?wbAuthorize.accessToken:@"",WeiBo_refreshToken:wbAuthorize.refreshToken?wbAuthorize.refreshToken:wbAuthorize.accessToken,WeiBo_expirationDate:wbAuthorize.expirationDate?wbAuthorize.expirationDate:@""};
+            [[NSNotificationCenter defaultCenter] postNotificationName:WEIBORELOADINFOMATION object:nil];
+        }
+    }
+
+}
+
+#pragma mark --- 通知处理
+- (void)notificationReceiveMethod:(NSDictionary *)userInfo
+{
+    GJNsLog(@"userinfo-->%@",userInfo);
+    if([[userInfo allKeys]containsObject:@"key1"] || [[userInfo allKeys]containsObject:RCIMPushKey])
+    {
+        if([[userInfo objectForKey:@"key1"] integerValue] == 9999 || [[userInfo allKeys]containsObject:RCIMPushKey])
+        {
+            if([UIApplication sharedApplication].applicationState == UIApplicationStateActive)
+            {
+                //前台的话  走的是融云 的代理didReceivedMessage   不需页面跳转
+            }
+            else
+            {
+                [[chatHelp sharedManager] pushChatListViewController];
+            }
+        }
+    }
+    else if([[userInfo allKeys]containsObject:ganjieJpushKey])
+    {
+        NSString *jsonString = [userInfo objectForKey:ganjieJpushKey];
+        NSDictionary *diccc = [jsonString objectFromJSONString];
+        if([[diccc allKeys] containsObject:ganjieValue_typeKey])
+        {
+            NSString *pushType = [diccc objectForKey:ganjieValue_typeKey];
+            if([pushType isEqualToString:ganjieValue_Order])
+            {
+                //订单 跳订单详情页;
+                NSString *orderIdStr = [diccc objectForKey:ganjieValue_Order_id];
+                NSString *orderNoStr = [diccc objectForKey:ganjieValue_Order_no];
+                
+                if([UIApplication sharedApplication].applicationState == UIApplicationStateActive)
+                {
+                    orderIdString = orderIdStr;
+                    UIAlertView *alertView = [[UIAlertView alloc]initWithTitle:@"提示" message:[NSString stringWithFormat:@"您的“%@订单”已经发货啦",orderNoStr] delegate:self cancelButtonTitle:@"查看详情" otherButtonTitles:@"我知道了", nil];
+                    alertView.tag = orderAlertTag;
+                    [alertView show];
+                }
+                else
+                {
+                    [self pushOrderDetailViewController:orderIdStr];
+                }
+                GJNsLog(@"订单推送");
+            }
+            else if ([pushType isEqualToString:ganjieValue_PayResult])
+            {
+                //支付 跳订单详情页;
+                NSString *orderIdStr = [diccc objectForKey:ganjieValue_Order_id];
+//                NSString *orderNoStr = [diccc objectForKey:ganjieValue_Order_no];
+                if([UIApplication sharedApplication].applicationState == UIApplicationStateActive)
+                {
+//                    orderIdString = orderIdStr;
+//                    UIAlertView *alertView = [[UIAlertView alloc]initWithTitle:@"支付通知" message:[NSString stringWithFormat:@"您的订单%@支付成功!",orderNoStr] delegate:self cancelButtonTitle:@"查看" otherButtonTitles:@"知道了", nil];
+//                    alertView.tag = orderAlertTag;
+//                    [alertView show];
+                }
+                else
+                {
+                    [self pushOrderDetailViewController:orderIdStr];
+                }
+                GJNsLog(@"支付推送");
+            }
+            else if ([pushType isEqualToString:ganjieValue_PayFail])
+            {
+                //支付 跳订单详情页;
+                NSString *orderIdStr = [diccc objectForKey:ganjieValue_Order_id];
+//                NSString *orderNoStr = [diccc objectForKey:ganjieValue_Order_no];
+                if([UIApplication sharedApplication].applicationState == UIApplicationStateActive)
+                {
+//                    orderIdString = orderIdStr;
+//                    UIAlertView *alertView = [[UIAlertView alloc]initWithTitle:@"支付通知" message:[NSString stringWithFormat:@"您的订单%@支付失败!",orderNoStr] delegate:self cancelButtonTitle:@"查看" otherButtonTitles:@"知道了", nil];
+//                    alertView.tag = orderAlertTag;
+//                    [alertView show];
+                }
+                else
+                {
+                    [self pushOrderDetailViewController:orderIdStr];
+                }
+                GJNsLog(@"支付推送");
+            }
+            else if ([pushType integerValue] == 2)
+            {
+                
+            }
+        }
+        else if([[diccc allKeys] containsObject:@"msgCode"])
+        {
+            NSString *pushType = [diccc objectForKey:@"msgCode"];
+            if([pushType integerValue] == 2)   //1是首页bannerdata数组只有多个值  2是推送data数组只有一个值
+            {
+                if([UIApplication sharedApplication].applicationState == UIApplicationStateActive)
+                {
+                    //如果是启动状态就不处理了。
+                }
+                else
+                {
+                    NSArray *dataArr = [diccc objectForKey:@"data"];
+                    NSDictionary *dataDic = [dataArr objectAtIndex:0];
+                    NSInteger type = [[diccc objectForKey:@"type"] integerValue];
+                    switch (type) {
+                        case 1:   //首页
+                        {
+                            
+                        }
+                            break;
+                        case 2:   //单品推送
+                        {
+                            NewGJGoodsDetailViewController *goodsDetailViewController = [[NewGJGoodsDetailViewController alloc] init];
+                            goodsDetailViewController.itemID = dataDic[@"itemId"];
+                            goodsDetailViewController.isShowTeleText = [dataDic[@"isImageAndText"] boolValue];
+                            [self currentNavCtrlPushOtherVC:goodsDetailViewController andHideBoomBar:YES];
+                        }
+                            break;
+                        case 3:   //农户详情
+                        {
+                            FarmerDetailViewController *farmerDetailVC = [[FarmerDetailViewController alloc] initWithBusiId:dataDic[@"busiId"]];
+                            [self currentNavCtrlPushOtherVC:farmerDetailVC andHideBoomBar:YES];
+                        }
+                            break;
+                        case 4:   //web活动页
+                        {
+                            GJBaseWebViewController* otherWebView = [[GJBaseWebViewController alloc]init];
+                            otherWebView.leftTitle = dataDic[@"title"];
+                            NSString *webStr = dataDic[@"url"];
+                            NSRange wenhaoRang = [webStr rangeOfString:@"?"];
+                            if(wenhaoRang.length)
+                            {
+                                //有没有?   有? 有没有参数
+                                NSString *subStr = [webStr substringFromIndex:wenhaoRang.location + 1];
+                                if(subStr.length > 0)
+                                {
+                                    webStr = [webStr stringByAppendingString:@"&app=1"];
+                                }
+                                else
+                                {
+                                    webStr = [webStr stringByAppendingString:@"app=1"];
+                                }
+                            }
+                            else
+                            {
+                                //没有?
+                                webStr = [webStr stringByAppendingString:@"?app=1"];
+                            }
+                            webStr = [[GJRequestNewWork manager] encryptURL:webStr];
+                            otherWebView.WebStr = webStr;
+                            [self currentNavCtrlPushOtherVC:otherWebView andHideBoomBar:YES];
+                        }
+                            break;
+                        case 5:   //版本更新
+                        {
+                            [self updateVersionMethod];
+                        }
+                            break;
+                            
+                        default:
+                            break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+//去订单详情页面
+- (void)pushOrderDetailViewController:(NSString *)orderId
+{
+    GJBaseWebViewController* OrderDetailViewController = [[GJBaseWebViewController alloc]init];
+    NSString *userId = [[NSUserDefaults standardUserDefaults] objectForKey:UserId];
+    if (EncryptURL) {
+        //加密
+        NSString *urlStr1 = [NSString stringWithFormat:@"%@%@&%@&uid=%@&orderId=%@",AppRequestTestWebURL,Request_orderDetail,Search_Common,userId,orderId];
+        NSString *urlStr = [[GJRequestNewWork manager] encryptURL:urlStr1];     //url加密
+        OrderDetailViewController.WebStr = urlStr;
+    }else{
+        //不加密
+        NSString *urlStr = [NSString stringWithFormat:@"%@%@&%@&uid=%@&orderId=%@",AppRequestTestWebURL,Request_orderDetail,Search_Common,userId,orderId];
+        OrderDetailViewController.WebStr = urlStr;
+    }
+    OrderDetailViewController.leftTitle = @"订单详情";
+    [self currentNavCtrlPushOtherVC:OrderDetailViewController andHideBoomBar:YES];
+}
+
+#pragma mark --- 融云消息回调
+-(void)didReceivedMessage:(RCMessage*)message left:(int)left
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+       [[chatHelp sharedManager] refreshRCMessageNum];
+        [self reloadChatViewControllerNoMessageViewShow];
+    });
+}
+
+//刷新聊天列表  暂无回话  的显示状态
+- (void)reloadChatViewControllerNoMessageViewShow
+{
+    [[NSNotificationCenter defaultCenter] postNotificationName:ReloadNoMessageViewShowKey object:nil];
+}
+
+//#pragma mark --- 融云连接状态监控
+//-(void)responseConnectionStatus:(RCConnectionStatus)status
+//{
+//    if(status == 6)
+//    {
+////        UIAlertView *alert = [[UIAlertView alloc]initWithTitle:@"提示" message:@"您的账号已经在其他设备上登录,重新登录?" delegate:self cancelButtonTitle:@"取消" otherButtonTitles:@"确定", nil];
+////        alert.tag = rcimChangeTag;
+////        [alert show];
+//    }
+//    GJNsLog(@"融云状态 变化回调--->%@",@(status));
+//}
+//
+//-(void)reconnectStatus:(int)status
+//{
+//    GJNsLog(@"融云 重新连接状态 变化回调--->%@",@(status));
+//}
+
+@end

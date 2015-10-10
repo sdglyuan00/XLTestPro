@@ -1,0 +1,66 @@
+////
+////  GJ-Prefix.pch
+////  GJ
+////
+////  Created by E269 on 14-11-28.
+////  Copyright (c) 2014年 ZKL. All rights reserved.
+////
+//
+//#ifndef GJ_GJ_Prefix_pch
+//#define GJ_GJ_Prefix_pch
+////#ifndef __IPHONE_3_0
+////#endif
+////
+////#ifdef __OBJC__
+//
+//
+//
+//
+////#import <UIKit/UIKit.h>
+////#import <Foundation/Foundation.h>
+////#import <CoreData/CoreData.h>
+////#import "AppMacro.h"
+////#import "GJRequestNewWork.h"
+////#import "UIImageView+WebCache.h"
+////#import "UIImageView+GJImageView.h"
+////#import "GJAppHelper.h"
+////#import "AppDelegate.h"
+////#import "stringHelp.h"
+////#import "MobClick.h"
+////#import "MBProgressHUD.h"
+////#import "GJLoadingHelp.h"
+////#import "BaseProgressHUD.h"
+////#import "GJUMengHelp.h"
+////
+////
+////#import "CacheModel.h"
+////#import "GJLocation.h"
+////
+////#import "KindsOfLogIn.h"
+////
+////#import "WeiboSDK.h"
+////#import "ShareDocuments.h"//分享文案
+////#import "MicroBlog_Sina.h"
+////#import "NearbyFarmerViewController.h"
+////#import "Ansen_AlerttView.h"
+////
+////#import "GJShopCartHeader.h"
+//////#import "GJShoppingCartViewController.h"
+////
+////#import "NewGJGoodsDetailViewController.h"
+////
+////
+////#import "GJCommentCellView.h"
+//////评论页面
+////#import "GJCommentViewController.h"
+////#import "ASMLNAVViewController.h"
+////
+////
+////#import "NSString+Emoji.h"
+////#ifdef DEBUG
+////#define GJNsLog(...)    NSLog(__VA_ARGS__)
+////#else
+////#define GJNsLog(...)    do { } while (0)
+////#endif
+////
+////#endif

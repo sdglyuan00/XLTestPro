@@ -1,0 +1,24 @@
+/* 
+  Localizable.strings
+  GJ
+
+  Created by E269 on 14-11-28.
+  Copyright (c) 2014年 ZKL. All rights reserved.
+*/
+// tableView 提示相关
+"GJ_TableView_PullDown"="下拉可以刷新";
+"GJ_TableView_loosenLoading"="放开刷新";
+"GJ_TableView_isLoading"="正在刷新";
+//喇叭
+"GJ_Input_Your_Request"="在这里发起您的请求";
+"GJ_Radio_Than"="当农户接受时，客服会第一时间通知您。";
+"GJ_IWant"="我想要";
+"GJ_Input_Your_Need"="在这里输入想要的农货，让农户更快的了解您的需求";
+"GJ_Detail_Content"="具体内容";
+"GJ_Input_Reminder"="请输入您的需求，如：您需要的农货具体品种、农货数量、期望的农货价格等，方便农户在看到后第一时间与您联系";
+"GJ_Contact"="联系人";
+"GJ_Input_Contact_Name"="请输入联系人真实姓名";
+"GJ_Contact_Type"="联系方式";
+"GJ_Input_Contact_type"="请输入联系人联系方式";
+//公用
+"GJ_NetWork_Error"="亲！您的网速好像不给力哦~";
